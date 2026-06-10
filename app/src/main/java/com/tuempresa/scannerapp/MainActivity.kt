@@ -1,13 +1,11 @@
 package com.tuempresa.scannerapp
 
 import android.Manifest
-import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Button
@@ -18,9 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import cz.adaptech.tesseract4android.Tesseract
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import java.io.File
@@ -117,40 +113,38 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
             photoUri?.let { uri ->
                 Toast.makeText(this, "Foto tomada, escaneando texto...", Toast.LENGTH_SHORT).show()
-                recognizeTextFromUri(uri)
+                recognizeTextWithTesseract(uri)
             }
         }
     }
 
-    private fun recognizeTextFromUri(uri: Uri) {
+    private fun recognizeTextWithTesseract(uri: Uri) {
         try {
             val inputStream = contentResolver.openInputStream(uri)
             val bitmap = BitmapFactory.decodeStream(inputStream)
             inputStream?.close()
 
-            val image = InputImage.fromBitmap(bitmap, 0)
-            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
-            recognizer.process(image)
-                .addOnSuccessListener { result ->
-                    lastScannedText = result.text
-                    if (lastScannedText.isNotEmpty()) {
-                        tvScannedText.text = lastScannedText
-                        btnSelectAndSave.isEnabled = true
-                        Toast.makeText(this, "Texto encontrado: ${lastScannedText.length} caracteres", Toast.LENGTH_SHORT).show()
-                    } else {
-                        tvScannedText.text = "No se encontró texto en la imagen"
-                        btnSelectAndSave.isEnabled = false
-                        Toast.makeText(this, "No se encontró texto", Toast.LENGTH_SHORT).show()
-                    }
-                }
-                .addOnFailureListener { e ->
-                    tvScannedText.text = "Error OCR: ${e.message}"
-                    btnSelectAndSave.isEnabled = false
-                    Toast.makeText(this, "Error en OCR", Toast.LENGTH_SHORT).show()
-                }
+            // Inicializar Tesseract
+            val tesseract = Tesseract(this)
+            tesseract.init("eng")  // Idioma inglés
+            
+            // Escanear texto
+            val recognizedText = tesseract.ocr(bitmap)
+            lastScannedText = recognizedText ?: ""
+            
+            if (lastScannedText.isNotEmpty()) {
+                tvScannedText.text = lastScannedText
+                btnSelectAndSave.isEnabled = true
+                Toast.makeText(this, "Texto encontrado: ${lastScannedText.length} caracteres", Toast.LENGTH_SHORT).show()
+            } else {
+                tvScannedText.text = "No se encontró texto en la imagen"
+                btnSelectAndSave.isEnabled = false
+                Toast.makeText(this, "No se encontró texto", Toast.LENGTH_SHORT).show()
+            }
         } catch (e: Exception) {
-            Toast.makeText(this, "Error al procesar imagen: ${e.message}", Toast.LENGTH_SHORT).show()
+            tvScannedText.text = "Error OCR: ${e.message}"
+            btnSelectAndSave.isEnabled = false
+            Toast.makeText(this, "Error en OCR: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
