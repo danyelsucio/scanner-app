@@ -15,10 +15,6 @@ android {
         versionName "1.0"
     }
 
-    buildFeatures {
-        viewBinding true
-    }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
@@ -30,14 +26,11 @@ android {
 }
 
 dependencies {
-    // Core mínimo
-    implementation 'androidx.core:core-ktx:1.12.0'
+    // Core mínimo para que funcione
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-
-    // Tesseract OCR
-    implementation 'cz.adaptech:tesseract4android:4.6.0'
-
-    // Excel
-    implementation 'org.apache.poi:poi-ooxml:5.2.5'
+    
+    // Solo cámara nativa (sin CameraX)
+    // Solo Tesseract OCR
+    // Solo Excel
 }
