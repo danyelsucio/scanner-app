@@ -3,7 +3,6 @@ package com.tuempresa.scannerapp
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -20,6 +19,7 @@ import cz.adaptech.tesseract4android.Tesseract
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
@@ -31,7 +31,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvScannedText: TextView
     private lateinit var btnSelectAndSave: Button
     
-    private var currentPhotoPath: String = ""
     private var lastScannedText: String = ""
     private var photoUri: Uri? = null
 
@@ -103,9 +102,7 @@ class MainActivity : AppCompatActivity() {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val imageFileName = "JPEG_${timeStamp}_"
         val storageDir = getExternalFilesDir(null)
-        return File.createTempFile(imageFileName, ".jpg", storageDir).apply {
-            currentPhotoPath = absolutePath
-        }
+        return File.createTempFile(imageFileName, ".jpg", storageDir)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -124,11 +121,9 @@ class MainActivity : AppCompatActivity() {
             val bitmap = BitmapFactory.decodeStream(inputStream)
             inputStream?.close()
 
-            // Inicializar Tesseract
             val tesseract = Tesseract(this)
-            tesseract.init("eng")  // Idioma inglés
+            tesseract.init("eng")
             
-            // Escanear texto
             val recognizedText = tesseract.ocr(bitmap)
             lastScannedText = recognizedText ?: ""
             
@@ -154,18 +149,18 @@ class MainActivity : AppCompatActivity() {
         
         AlertDialog.Builder(this)
             .setTitle("Texto escaneado:")
-            .setMessage(fullText.take(200) + if (fullText.length > 200) "..." else "")
+            .setMessage(fullText.take(200))
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> saveToExcel(fullText)
-                    1 -> showWordSelection(words, fullText)
+                    1 -> showWordSelection(words)
                 }
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
-    private fun showWordSelection(words: List<String>, originalText: String) {
+    private fun showWordSelection(words: List<String>) {
         AlertDialog.Builder(this)
             .setTitle("Selecciona la palabra o frase")
             .setItems(words.toTypedArray()) { _, which ->
@@ -179,29 +174,6 @@ class MainActivity : AppCompatActivity() {
                     .setNegativeButton("Cancelar", null)
                     .show()
             }
-            .setNeutralButton("Guardar frase personalizada") { _, _ ->
-                showCustomPhraseDialog(originalText)
-            }
-            .show()
-    }
-
-    private fun showCustomPhraseDialog(fullText: String) {
-        val input = android.widget.EditText(this)
-        input.setText(fullText)
-        input.setSelection(fullText.length)
-        
-        AlertDialog.Builder(this)
-            .setTitle("Escribe o modifica la frase a guardar")
-            .setView(input)
-            .setPositiveButton("Guardar") { _, _ ->
-                val customText = input.text.toString()
-                if (customText.isNotEmpty()) {
-                    saveToExcel(customText)
-                } else {
-                    Toast.makeText(this, "No se guardó nada", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("Cancelar", null)
             .show()
     }
 
@@ -235,12 +207,6 @@ class MainActivity : AppCompatActivity() {
             workbook.close()
 
             Toast.makeText(this, "✓ Guardado en Excel correctamente", Toast.LENGTH_LONG).show()
-
-            AlertDialog.Builder(this)
-                .setTitle("Éxito")
-                .setMessage("Texto guardado en Excel\n📁 ${excelFile.absolutePath}")
-                .setPositiveButton("OK", null)
-                .show()
 
         } catch (e: Exception) {
             Toast.makeText(this, "Error al guardar: ${e.message}", Toast.LENGTH_LONG).show()
