@@ -42,3 +42,12 @@ dependencies {
     // Crear archivos Excel (XLSX)
     implementation 'org.apache.poi:poi-ooxml:5.2.5'
 }
+
+// Forzar versiones compatibles
+configurations.all {
+    resolutionStrategy {
+        force 'androidx.exifinterface:exifinterface:1.3.6'
+        force 'androidx.core:core:1.12.0'
+        force 'androidx.core:core-ktx:1.12.0'
+    }
+}
