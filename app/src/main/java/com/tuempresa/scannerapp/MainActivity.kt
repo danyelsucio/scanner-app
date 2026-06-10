@@ -11,204 +11,214 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.*
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import org.apache.poi.ss.usermodel.Workbook
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
+import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var previewView: PreviewView
-    private lateinit var btnCapture: Button
-    private var imageCapture: ImageCapture? = null
-    private lateinit var cameraExecutor: ExecutorService
-    private var ultimaImagenUri: Uri? = null
+    private lateinit var btnTakePhoto: Button
+    private lateinit var tvScannedText: TextView
+    private lateinit var btnSelectAndSave: Button
+    
+    private var currentPhotoPath: String = ""
+    private var lastScannedText: String = ""
+    private var photoUri: Uri? = null
 
     companion object {
         private const val CAMERA_PERMISSION_REQUEST = 100
+        private const val REQUEST_IMAGE_CAPTURE = 1
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        previewView = findViewById(R.id.previewView)
-        btnCapture = findViewById(R.id.btnCapture)
+        btnTakePhoto = findViewById(R.id.btnTakePhoto)
+        tvScannedText = findViewById(R.id.tvScannedText)
+        btnSelectAndSave = findViewById(R.id.btnSelectAndSave)
 
-        if (allPermissionsGranted()) {
-            startCamera()
-        } else {
-            ActivityCompat.requestPermissions(
-                this,
-                arrayOf(Manifest.permission.CAMERA),
-                CAMERA_PERMISSION_REQUEST
-            )
+        btnTakePhoto.setOnClickListener {
+            if (checkCameraPermission()) {
+                dispatchTakePictureIntent()
+            } else {
+                requestCameraPermission()
+            }
         }
 
-        btnCapture.setOnClickListener {
-            takePhotoAndScan()
+        btnSelectAndSave.setOnClickListener {
+            if (lastScannedText.isNotEmpty()) {
+                showSelectionDialog(lastScannedText)
+            }
         }
-
-        cameraExecutor = Executors.newSingleThreadExecutor()
     }
 
-    private fun allPermissionsGranted() = ContextCompat.checkSelfPermission(
-        this, Manifest.permission.CAMERA
-    ) == PackageManager.PERMISSION_GRANTED
+    private fun checkCameraPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+    }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
+    private fun requestCameraPermission() {
+        ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), CAMERA_PERMISSION_REQUEST)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == CAMERA_PERMISSION_REQUEST) {
-            if (allPermissionsGranted()) {
-                startCamera()
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                dispatchTakePictureIntent()
             } else {
-                Toast.makeText(this, "Permiso de cámara necesario", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Se necesita permiso de cámara", Toast.LENGTH_SHORT).show()
             }
         }
     }
 
-    private fun startCamera() {
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
-
-        cameraProviderFuture.addListener({
-            val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
-
-            val preview = Preview.Builder()
-                .build()
-                .also {
-                    it.setSurfaceProvider(previewView.surfaceProvider)
+    private fun dispatchTakePictureIntent() {
+        Intent(MediaStore.ACTION_IMAGE_CAPTURE).also { takePictureIntent ->
+            takePictureIntent.resolveActivity(packageManager)?.also {
+                val photoFile = createImageFile()
+                photoFile?.also {
+                    photoUri = FileProvider.getUriForFile(
+                        this,
+                        "${packageName}.fileprovider",
+                        it
+                    )
+                    takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoUri)
+                    startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE)
                 }
-
-            imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
-
-            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-            try {
-                cameraProvider.unbindAll()
-                cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture
-                )
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Toast.makeText(this, "Error al iniciar cámara", Toast.LENGTH_SHORT).show()
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun takePhotoAndScan() {
-        val imageCapture = imageCapture ?: return
-
-        val name = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, "temp_$name.jpg")
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT > Build.VERSION_CODES.P) {
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ScannerApp")
             }
         }
-
-        val outputOptions = ImageCapture.OutputFileOptions.Builder(
-            contentResolver,
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        ).build()
-
-        imageCapture.takePicture(
-            outputOptions,
-            ContextCompat.getMainExecutor(this),
-            object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    ultimaImagenUri = outputFileResults.savedUri
-                    Toast.makeText(this@MainActivity, "Foto tomada, escaneando texto...", Toast.LENGTH_SHORT).show()
-                    reconocerTexto()
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    Toast.makeText(this@MainActivity, "Error al tomar foto", Toast.LENGTH_SHORT).show()
-                }
-            }
-        )
     }
 
-    private fun reconocerTexto() {
-        val uri = ultimaImagenUri ?: return
-
-        val inputStream = contentResolver.openInputStream(uri)
-        val bitmap = BitmapFactory.decodeStream(inputStream)
-        inputStream?.close()
-
-        val image = InputImage.fromBitmap(bitmap, 0)
-        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-
-        recognizer.process(image)
-            .addOnSuccessListener { result ->
-                val textoCompleto = result.text
-                if (textoCompleto.isNotEmpty()) {
-                    mostrarDialogoSeleccion(textoCompleto)
-                } else {
-                    Toast.makeText(this, "No se encontró texto en la imagen", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .addOnFailureListener { e ->
-                Toast.makeText(this, "Error OCR: ${e.message}", Toast.LENGTH_SHORT).show()
-            }
+    private fun createImageFile(): File? {
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val imageFileName = "JPEG_${timeStamp}_"
+        val storageDir = getExternalFilesDir(null)
+        return File.createTempFile(imageFileName, ".jpg", storageDir).apply {
+            currentPhotoPath = absolutePath
+        }
     }
 
-    private fun mostrarDialogoSeleccion(textoCompleto: String) {
-        val opciones = arrayOf("Seleccionar parte del texto", "Guardar todo el texto")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
+            photoUri?.let { uri ->
+                Toast.makeText(this, "Foto tomada, escaneando texto...", Toast.LENGTH_SHORT).show()
+                recognizeTextFromUri(uri)
+            }
+        }
+    }
 
+    private fun recognizeTextFromUri(uri: Uri) {
+        try {
+            val inputStream = contentResolver.openInputStream(uri)
+            val bitmap = BitmapFactory.decodeStream(inputStream)
+            inputStream?.close()
+
+            val image = InputImage.fromBitmap(bitmap, 0)
+            val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+
+            recognizer.process(image)
+                .addOnSuccessListener { result ->
+                    lastScannedText = result.text
+                    if (lastScannedText.isNotEmpty()) {
+                        tvScannedText.text = lastScannedText
+                        btnSelectAndSave.isEnabled = true
+                        Toast.makeText(this, "Texto encontrado: ${lastScannedText.length} caracteres", Toast.LENGTH_SHORT).show()
+                    } else {
+                        tvScannedText.text = "No se encontró texto en la imagen"
+                        btnSelectAndSave.isEnabled = false
+                        Toast.makeText(this, "No se encontró texto", Toast.LENGTH_SHORT).show()
+                    }
+                }
+                .addOnFailureListener { e ->
+                    tvScannedText.text = "Error OCR: ${e.message}"
+                    btnSelectAndSave.isEnabled = false
+                    Toast.makeText(this, "Error en OCR", Toast.LENGTH_SHORT).show()
+                }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Error al procesar imagen: ${e.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showSelectionDialog(fullText: String) {
+        val words = fullText.split(Regex("\\s+"))
+        val options = arrayOf("Guardar TODO el texto", "Seleccionar palabra o frase")
+        
         AlertDialog.Builder(this)
-            .setTitle("Texto encontrado:")
-            .setMessage(textoCompleto)
-            .setItems(opciones) { _, which ->
+            .setTitle("Texto escaneado:")
+            .setMessage(fullText.take(200) + if (fullText.length > 200) "..." else "")
+            .setItems(options) { _, which ->
                 when (which) {
-                    0 -> seleccionarParte(textoCompleto)
-                    1 -> guardarEnExcel(textoCompleto)
+                    0 -> saveToExcel(fullText)
+                    1 -> showWordSelection(words, fullText)
                 }
             }
             .setNegativeButton("Cancelar", null)
             .show()
     }
 
-    private fun seleccionarParte(textoCompleto: String) {
-        val palabras = textoCompleto.split(Regex("\\s+"))
+    private fun showWordSelection(words: List<String>, originalText: String) {
         AlertDialog.Builder(this)
-            .setTitle("Selecciona lo que quieres guardar")
-            .setItems(palabras.toTypedArray()) { _, which ->
-                val seleccionado = palabras[which]
-                guardarEnExcel(seleccionado)
+            .setTitle("Selecciona la palabra o frase")
+            .setItems(words.toTypedArray()) { _, which ->
+                val selected = words[which]
+                AlertDialog.Builder(this)
+                    .setTitle("¿Guardar esta frase?")
+                    .setMessage("Texto seleccionado: \"$selected\"")
+                    .setPositiveButton("Guardar") { _, _ ->
+                        saveToExcel(selected)
+                    }
+                    .setNegativeButton("Cancelar", null)
+                    .show()
+            }
+            .setNeutralButton("Guardar frase personalizada") { _, _ ->
+                showCustomPhraseDialog(originalText)
             }
             .show()
     }
 
-    private fun guardarEnExcel(textoAGuardar: String) {
+    private fun showCustomPhraseDialog(fullText: String) {
+        val input = android.widget.EditText(this)
+        input.setText(fullText)
+        input.setSelection(fullText.length)
+        
+        AlertDialog.Builder(this)
+            .setTitle("Escribe o modifica la frase a guardar")
+            .setView(input)
+            .setPositiveButton("Guardar") { _, _ ->
+                val customText = input.text.toString()
+                if (customText.isNotEmpty()) {
+                    saveToExcel(customText)
+                } else {
+                    Toast.makeText(this, "No se guardó nada", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun saveToExcel(textToSave: String) {
         try {
-            val excelFile = java.io.File(getExternalFilesDir(null), "datos_escaneo.xlsx")
+            val excelFile = File(getExternalFilesDir(null), "datos_escaneo.xlsx")
             val workbook: Workbook
             val sheet: org.apache.poi.ss.usermodel.Sheet
 
             if (excelFile.exists()) {
-                val fis = java.io.FileInputStream(excelFile)
+                val fis = FileInputStream(excelFile)
                 workbook = XSSFWorkbook(fis)
                 sheet = workbook.getSheetAt(0)
                 fis.close()
@@ -222,36 +232,24 @@ class MainActivity : AppCompatActivity() {
 
             val nextRow = sheet.lastRowNum + 1
             val row = sheet.createRow(nextRow)
-            row.createCell(0).setCellValue(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date()))
-            row.createCell(1).setCellValue(textoAGuardar)
+            row.createCell(0).setCellValue(SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date()))
+            row.createCell(1).setCellValue(textToSave)
 
             val fos = FileOutputStream(excelFile)
             workbook.write(fos)
             fos.close()
             workbook.close()
 
-            Toast.makeText(this, "Guardado en Excel ✅\n${excelFile.absolutePath}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "✓ Guardado en Excel correctamente", Toast.LENGTH_LONG).show()
 
-            // Preguntar si quiere abrir el archivo
             AlertDialog.Builder(this)
-                .setTitle("¿Abrir el archivo Excel?")
-                .setPositiveButton("Sí") { _, _ ->
-                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                        setDataAndType(Uri.fromFile(excelFile), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-                        flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    }
-                    startActivity(intent)
-                }
-                .setNegativeButton("Ahora no", null)
+                .setTitle("Éxito")
+                .setMessage("Texto guardado en Excel\n📁 ${excelFile.absolutePath}")
+                .setPositiveButton("OK", null)
                 .show()
 
         } catch (e: Exception) {
             Toast.makeText(this, "Error al guardar: ${e.message}", Toast.LENGTH_LONG).show()
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        cameraExecutor.shutdown()
     }
 }
